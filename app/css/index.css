@@ -1,4 +1,4 @@
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -22,6 +22,14 @@ body {
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(1rem); }
   to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes borderProgress {
+  0% { width: 100%; }
+  100% { width: 0%; }
 }
 .animate-spin { animation: spin 1s linear infinite; }
 .animate-slide-up { animation: slideUp .25s ease-out forwards; }
@@ -83,23 +91,27 @@ body {
 .section-title .line { flex: 1; height: 1px; background: #e2e8f0; }
 
 /* ---- form grid ---- */
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .625rem .875rem; }
+/* minmax(0, 1fr) lets columns shrink below their content's width,
+   so long select options can't push neighbouring fields around */
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .625rem .875rem; }
 .field { min-width: 0; }
 .field.full { grid-column: 1 / -1; }
 .field.span-2 { grid-column: span 2; }
-@media (max-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .field.span-2 { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .grid { grid-template-columns: minmax(0, 1fr); } .field.span-2 { grid-column: 1 / -1; } }
 
 .field-label { display: block; font-size: .75rem; font-weight: 600; color: #334155; margin-bottom: .25rem; }
 .asterisk { color: #e11d48; font-weight: 700; }
 
 .input {
-  width: 100%; font-size: .8125rem; font-family: inherit;
+  width: 100%; min-width: 0; max-width: 100%;
+  font-size: .8125rem; font-family: inherit;
   padding: .4375rem .75rem;
   border-radius: .625rem; border: 1px solid #cbd5e1;
   background: #fff; color: #1e293b;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
+select.input { text-overflow: ellipsis; }
 .input::placeholder { color: #94a3b8; }
 .input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
 .input.input-error { border-color: #f43f5e; box-shadow: 0 0 0 2px rgba(244,63,94,.2); }
@@ -113,7 +125,7 @@ body {
 /* ---- multi select ---- */
 .ms-wrap { position: relative; }
 .ms-btn { display: flex; align-items: center; justify-content: space-between; gap: .5rem; text-align: left; cursor: pointer; }
-.ms-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-text.placeholder { color: #94a3b8; }
 .ms-btn svg { width: 1rem; height: 1rem; color: #64748b; flex-shrink: 0; }
 .ms-panel {
@@ -139,32 +151,112 @@ body {
 .btn-primary:hover { background: #1d4ed8; }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
 
-/* ---- popup modal ---- */
-.popup-overlay {
-  position: fixed; inset: 0;
-  background: rgba(15,23,42,.5);
-  z-index: 1000;
-  display: flex; align-items: center; justify-content: center;
-  padding: 1rem;
-  backdrop-filter: blur(4px);
+/* ---- Modern Toast Notification (Top-Right Floating Card) ---- */
+#app-toast {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 10000;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 0.875rem 1rem 0.875rem 0.875rem;
+  border-radius: 0.875rem;
+  box-shadow: 
+    0 10px 15px -3px rgba(15, 23, 42, 0.08), 
+    0 20px 25px -5px rgba(15, 23, 42, 0.04),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  min-width: 19rem;
+  max-width: 25rem;
+  overflow: hidden;
+  animation: toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-.popup-card {
-  background: #fff; border-radius: 1rem; padding: 1.5rem; text-align: center;
-  box-shadow: 0 25px 50px -12px rgba(0,0,0,.25);
-  width: 100%; max-width: 24rem; border: 1px solid #e2e8f0;
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-0.75rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
-.status-icon {
-  margin: 0 auto .75rem; display: flex; align-items: center; justify-content: center;
-  height: 3rem; width: 3rem; border-radius: 9999px;
-  background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
+
+@keyframes borderProgress {
+  0% { width: 100%; }
+  100% { width: 0%; }
 }
-.status-icon.success { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
-.status-icon svg { height: 1.5rem; width: 1.5rem; }
-.popup-title { font-size: .875rem; font-weight: 700; color: #0f172a; margin: 0 0 .25rem; }
-.popup-message { font-size: .75rem; color: #475569; line-height: 1.6; margin: 0 0 1rem; }
-.popup-close-btn {
-  width: 100%; background: #0f172a; color: #fff; font-weight: 600;
-  padding: .625rem 1rem; border-radius: .75rem; font-size: .75rem;
-  border: none; cursor: pointer; transition: background .15s ease;
+
+.toast-body {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
-.popup-close-btn:hover { background: #1e293b; }
+
+/* Icon Badges */
+.toast-icon-badge {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.toast.success .toast-icon-badge {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.toast.error .toast-icon-badge {
+  background: #fff1f2;
+  color: #e11d48;
+  border: 1px solid #fecdd3;
+}
+
+.toast-icon-badge svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Toast Text Styling */
+.toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.toast-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.toast-text {
+  font-size: 0.75rem;
+  color: #475569;
+  line-height: 1.45;
+  font-weight: 450;
+}
+
+/* Animated Top Progress Timer Bar */
+.toast-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3px;
+  animation: borderProgress linear forwards;
+}
+
+.toast.success .toast-progress {
+  background: linear-gradient(90deg, #10b981, #059669);
+}
+
+.toast.error .toast-progress {
+  background: linear-gradient(90deg, #f43f5e, #e11d48);
+}

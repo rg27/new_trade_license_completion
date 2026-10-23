@@ -1,7 +1,9 @@
-let currentRecordId, triggeredByUser = null;
+let currentRecordId, currentLfId, currentAccountId, triggeredByUser = null;
 
 /* ---------------------------------------------------------------
    Dropdown options
+   (LICENSE_TYPES and LICENSE_ACTIVITIES are the full fallback lists;
+    they get narrowed to the jurisdiction's children after load)
 --------------------------------------------------------------- */
 const LICENSE_TYPES = [
     "Holding Trade License", "Regular Trade License", "Freelancer License",
@@ -36,7 +38,7 @@ const COUNTRIES = "Åland Islands|Afghanistan|Akrotiri|Albania|Algeria|American 
    Field definitions
 --------------------------------------------------------------- */
 const LICENSE_FIELDS = [
-    { key: "trade_license_name",      label: "Trade License Name",          type: "text",   required: true },
+    { key: "trade_license_name",      label: "Trade License Name",         type: "text",   required: true },
     { key: "license_registration_no", label: "License Registration Number", type: "text",   required: true },
     { key: "license_type",            label: "License Type",               type: "select", required: true, options: LICENSE_TYPES },
     { key: "license_package",         label: "License Package",            type: "select", required: true, options: visaPackages() },
@@ -67,6 +69,9 @@ const multiSelectState = {}; // key -> array of selected values
 /* ---------------------------------------------------------------
    Rendering
 --------------------------------------------------------------- */
+const msItemsHtml = (options) => options.map(o => `
+    <label class="ms-option"><input type="checkbox" class="ms-check" value="${o}"><span>${o}</span></label>`).join("");
+
 function renderField(f) {
     const wrap = document.createElement("div");
     wrap.className = "field" + (f.full ? " full" : "") + (f.span2 ? " span-2" : "");
@@ -82,14 +87,12 @@ function renderField(f) {
         const opts = f.options.map(o => `<option value="${o}">${o}</option>`).join("");
         control = `<select id="${f.key}" class="input"><option value="">-- Select --</option>${opts}</select>`;
     } else if (f.type === "multiselect") {
-        const items = f.options.map(o => `
-            <label class="ms-option"><input type="checkbox" class="ms-check" value="${o}"><span>${o}</span></label>`).join("");
         control = `
           <div class="ms-wrap" id="${f.key}-wrap">
             <button type="button" id="${f.key}" class="input ms-btn">
               <span id="${f.key}-text" class="ms-text placeholder">-- Select activities --</span>${CHEVRON}
             </button>
-            <div id="${f.key}-panel" class="ms-panel hidden">${items}</div>
+            <div id="${f.key}-panel" class="ms-panel hidden">${msItemsHtml(f.options)}</div>
           </div>`;
     }
 
@@ -131,16 +134,16 @@ function setupMultiSelect(f) {
     multiSelectState[f.key] = [];
     const btn = document.getElementById(f.key);
     const panel = document.getElementById(`${f.key}-panel`);
-    const text = document.getElementById(`${f.key}-text`);
 
     btn.addEventListener("click", () => panel.classList.toggle("hidden"));
 
-    panel.querySelectorAll(".ms-check").forEach(cb => {
-        cb.addEventListener("change", () => {
-            multiSelectState[f.key] = [...panel.querySelectorAll(".ms-check:checked")].map(c => c.value);
-            refreshMultiSelect(f);
-            if (multiSelectState[f.key].length > 0) clearError(f);
-        });
+    // Event delegation: checkboxes are rebuilt when options are filtered,
+    // so listen on the panel instead of on each checkbox
+    panel.addEventListener("change", (e) => {
+        if (!e.target.classList.contains("ms-check")) return;
+        multiSelectState[f.key] = [...panel.querySelectorAll(".ms-check:checked")].map(c => c.value);
+        refreshMultiSelect(f);
+        if (multiSelectState[f.key].length > 0) clearError(f);
     });
 
     document.addEventListener("click", (e) => {
@@ -198,7 +201,7 @@ function validateForm() {
 }
 
 /* ---------------------------------------------------------------
-   Loader & Popup
+   Loader & Toast Notifications
 --------------------------------------------------------------- */
 function showLoader(text = "Saving license...") {
     document.getElementById("loader-text").textContent = text;
@@ -213,30 +216,44 @@ function hideLoader() {
     o.setAttribute("aria-hidden", "true");
 }
 
-function showPopup(titleText, message, type = "error") {
-    const popup = document.getElementById("popup");
-    const icon = document.getElementById("statusIcon");
-    document.getElementById("popupTitle").textContent = titleText;
-    document.getElementById("popupMessage").textContent = message;
+/* ---------------------------------------------------------------
+   Toast Notifications (Top-Right with Top Animated Progress Bar)
+--------------------------------------------------------------- */
+function showToast(message, type = "success", duration = 4000, onClose = null) {
+    const existing = document.getElementById("app-toast");
+    if (existing) existing.remove();
 
-    popup.setAttribute("data-status", type);
-    icon.className = "status-icon" + (type === "success" ? " success" : "");
-    icon.innerHTML = type === "success" ? CHECK_ICON : WARN_ICON;
-    popup.classList.remove("hidden");
-}
+    const toast = document.createElement("div");
+    toast.id = "app-toast";
+    toast.className = `toast ${type}`;
 
-function hidePopup() {
-    const popup = document.getElementById("popup");
-    const status = popup.getAttribute("data-status");
-    const titleText = document.getElementById("popupTitle").textContent;
+    const iconSvg = type === "success" ? CHECK_ICON : WARN_ICON;
+    const titleText = type === "success" ? "Success" : "Action Required";
 
-    if (status === "success") {
-        ZOHO.CRM.UI.Popup.closeReload();
-    } else if (titleText === "System Error") {
-        ZOHO.CRM.UI.Popup.close();
-    } else {
-        popup.classList.add("hidden");
-    }
+    toast.innerHTML = `
+        <div class="toast-progress" style="animation-duration: ${duration}ms;"></div>
+        <div class="toast-body">
+            <div class="toast-icon-badge">
+                ${iconSvg}
+            </div>
+            <div class="toast-content">
+                <span class="toast-title">${titleText}</span>
+                <span class="toast-text">${message}</span>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(-0.5rem) scale(0.96)";
+        toast.style.transition = "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)";
+        setTimeout(() => {
+            toast.remove();
+            if (typeof onClose === "function") onClose();
+        }, 300);
+    }, duration);
 }
 
 /* ---------------------------------------------------------------
@@ -252,15 +269,20 @@ ZOHO.embeddedApp.init();
 
 /* Map: key returned by tl_completion_data -> form field key */
 const DATA_MAP = {
-    tl_name:                  "trade_license_name",
-    tl_reg_number:            "license_registration_no",
-    tl_license_type:          "license_type",
-    tl_license_package:       "license_package",
-    tl_license_activities:    "license_activities",
-    tl_license_issuance_date: "license_issuance_date",
-    tl_license_start_date:    "license_start_date",
-    tl_license_expiry_date:   "license_expiry_date",
-    tl_my_license_duration:   "license_duration"
+    tl_name:                    "trade_license_name",
+    tl_reg_number:              "license_registration_no",
+    tl_license_type:            "license_type",
+    tl_license_package:         "license_package",
+    tl_license_activities:      "license_activities",
+    tl_license_issuance_date:   "license_issuance_date",
+    tl_license_start_date:      "license_start_date",
+    tl_license_expiry_date:     "license_expiry_date",
+    tl_my_license_duration:     "license_duration",
+    account_billing_street:     "street_address",
+    account_billing_city:       "city",
+    account_billing_state:      "state",
+    account_billing_country:    "country",
+    account_billing_code:       "code"
 };
 
 function resolveRecordId(e) {
@@ -282,7 +304,6 @@ function resolveRecordId(e) {
     return fromObj(e.EntityId) || fromObj(e.value) || fromObj(e.data) || fromObj(e);
 }
 
-// Searches the whole response (including JSON text inside strings) for the object that holds the tl_* fields
 function findDataObject(node, depth = 0) {
     if (node === null || node === undefined || depth > 6) return null;
 
@@ -314,7 +335,6 @@ function parseFunctionOutput(response) {
     return findDataObject(response);
 }
 
-// Date inputs need yyyy-MM-dd
 function toInputDate(val) {
     if (!val) return "";
     if (/^\d{4}-\d{2}-\d{2}/.test(val)) return String(val).slice(0, 10);
@@ -329,10 +349,26 @@ function setSelectValue(el, val) {
     if (match) {
         el.value = match.value;
     } else {
-        // value exists in CRM but not in our list: keep it instead of dropping it
         const opt = new Option(val, val);
         el.add(opt);
         el.value = val;
+    }
+}
+
+/* Replace a field's options with the jurisdiction's child options.
+   Falls back to the full list if none were returned. */
+function setFieldOptions(fieldKey, options) {
+    const f = fieldByKey(fieldKey);
+    const list = (Array.isArray(options) && options.length) ? options : f.options;
+
+    if (f.type === "select") {
+        const el = document.getElementById(f.key);
+        el.innerHTML = `<option value="">-- Select --</option>` +
+            list.map(o => `<option value="${o}">${o}</option>`).join("");
+    } else if (f.type === "multiselect") {
+        document.getElementById(`${f.key}-panel`).innerHTML = msItemsHtml(list);
+        multiSelectState[f.key] = [];
+        refreshMultiSelect(f);
     }
 }
 
@@ -344,7 +380,9 @@ function populateForm(data) {
 
         if (f.type === "multiselect") {
             if (typeof val === "string") val = val.split(",").map(x => x.trim()).filter(Boolean);
-            multiSelectState[f.key] = Array.isArray(val) ? val : [];
+            // Keep only values that are valid options for this jurisdiction
+            const allowed = [...document.querySelectorAll(`#${f.key}-panel .ms-check`)].map(c => c.value);
+            multiSelectState[f.key] = (Array.isArray(val) ? val : []).filter(v => allowed.includes(v));
             refreshMultiSelect(f);
             return;
         }
@@ -357,7 +395,6 @@ function populateForm(data) {
     });
 }
 
-// Short, readable text of any value, for error messages
 function shorten(v, max = 350) {
     let t;
     try { t = typeof v === "string" ? v : (v instanceof Error ? v.message : JSON.stringify(v)); } catch (err) { t = String(v); }
@@ -393,29 +430,42 @@ async function initializeWidget(e) {
 
         if (!currentRecordId) {
             hideLoader();
-            showPopup("Load Failed", "The record ID was not received by the widget, so the existing data could not be loaded. Received: " + shorten(e), "error");
+            showToast("The record ID was not received, so existing data could not be loaded.", "error", 4000);
             return;
         }
 
-        // Pull the existing data from the Applications1 record and fill the form
         try {
+            const functionArgs = { "application_id": currentRecordId };
+            console.log("Executing 'new_tl_completion_data1' with parameters:", functionArgs);
+
             const response = await ZOHO.CRM.FUNCTIONS.execute("new_tl_completion_data1", {
-                "arguments": JSON.stringify({ "application_id": currentRecordId })
+                "arguments": JSON.stringify(functionArgs)
             });
-            console.log("new_tl_completion_data1 response:", JSON.stringify(response, null, 2));
+            console.log("'new_tl_completion_data1' raw response:", JSON.stringify(response, null, 2));
 
             const data = parseFunctionOutput(response);
             if (!data) {
                 hideLoader();
-                showPopup("Load Failed", "The function responded, but no license fields (tl_name, tl_reg_number...) were found in it. Response: " + shorten(response), "error");
+                showToast("No license fields were found in the function response.", "error", 4000);
                 return;
             }
-            console.log("Data used to populate the form:", data);
+
+            currentLfId = data.lf_id || data.LF_Id || null;
+            currentAccountId = data.account_id || data.Account_Id || null;
+            console.log("Captured currentLfId:", currentLfId);
+            console.log("Captured currentAccountId:", currentAccountId);
+
+            console.log("Parsed data used to populate form:", data);
+
+            // Narrow the dropdowns to the jurisdiction's child options first,
+            // then populate the saved values
+            setFieldOptions("license_type", data.license_type_options);
+            setFieldOptions("license_activities", data.license_activity_options);
             populateForm(data);
         } catch (loadErr) {
             console.error("Could not load license data:", loadErr);
             hideLoader();
-            showPopup("Load Failed", "We couldn't load the existing license data (" + shorten(loadErr) + "). You can still fill in the form manually.", "error");
+            showToast("Couldn't load existing license data. You can still fill in the form manually.", "error", 4000);
             return;
         }
 
@@ -424,7 +474,7 @@ async function initializeWidget(e) {
     } catch (err) {
         console.error(err);
         hideLoader();
-        showPopup("System Error", `Hi ${triggeredByUser || 'User'}, there is an issue with the internal system. Please reach out to your Zoho Developer.`, "error");
+        showToast(`Hi ${triggeredByUser || 'User'}, there is an issue with the internal system.`, "error", 4000);
     }
 }
 
@@ -444,6 +494,8 @@ async function handleAction(event) {
         const v = (k) => getValue(fieldByKey(k));
         const payload = {
             "record_id": currentRecordId,
+            "lf_id": currentLfId,
+            "account_id": currentAccountId,
             "triggered_by": triggeredByUser,
             "license": {
                 "trade_license_name":      v("trade_license_name"),
@@ -458,25 +510,26 @@ async function handleAction(event) {
             },
             "address": {
                 "street_address": v("street_address"),
-                "city":           v("city"),
-                "state":          v("state"),
-                "country":        v("country"),
-                "code":           v("code")
+                "city":          v("city"),
+                "state":         v("state"),
+                "country":       v("country"),
+                "code":          v("code")
             }
         };
 
-        console.log("Payload Arguments (JSON):", payload);
+        console.log("Executing 'new_license_completion_update_trade_license' with parameters (Payload):", payload);
 
-        // Replace with your actual Deluge function API name
-        const response = await ZOHO.CRM.FUNCTIONS.execute("create_trade_license", {
+        const response = await ZOHO.CRM.FUNCTIONS.execute("new_license_completion_update_trade_license", {
             "arguments": JSON.stringify(payload)
         });
 
-        console.log("Execute Function Response (JSON):", JSON.stringify(response, null, 2));
+        console.log("'new_license_completion_update_trade_license' raw response:", JSON.stringify(response, null, 2));
         hideLoader();
 
         if (response && response.code === "success") {
-            showPopup("License Saved", "The trade license details have been saved successfully.", "success");
+            showToast("The trade license details have been successfully updated.", "success", 4000, () => {
+                ZOHO.CRM.UI.Popup.closeReload();
+            });
         } else {
             throw new Error((response && response.code) || "Operation failed");
         }
@@ -484,7 +537,7 @@ async function handleAction(event) {
         console.error(error);
         hideLoader();
         submitBtn.disabled = false;
-        showPopup("Save Failed", `Hi ${triggeredByUser || 'User'}, there is an issue with the internal system. Please reach out to your Zoho Developer.`, "error");
+        showToast(`Hi ${triggeredByUser || 'User'}, save failed. Please check your inputs or try again.`, "error", 4000);
     }
 }
 
