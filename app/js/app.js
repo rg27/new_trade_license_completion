@@ -14,12 +14,18 @@ const LICENSE_TYPES = [
 ];
 
 const visaPackages = () => {
-    const list = ["Zero Visa License"];
-    for (let i = 1; i <= 6; i++) list.push(`${i} Visa License`);
-    list.push("Zero Visa Freelance Permit", "7 Visa License", "1 Visa Freelance Permit",
-              "8 Visa License", "Holding", "9 Visa License");
-    for (let i = 10; i <= 30; i++) list.push(`${i} Visa License`);
-    list.push("Based on Office Size");
+    const list = [];
+
+    // Visa licenses: Zero, then 1 to 30
+    list.push("Zero Visa License");
+    for (let i = 1; i <= 30; i++) list.push(`${i} Visa License`);
+
+    // Freelance permits
+    list.push("Zero Visa Freelance Permit", "1 Visa Freelance Permit");
+
+    // Others
+    list.push("Holding", "Based on Office Size");
+
     return list;
 };
 
@@ -171,6 +177,27 @@ function clearError(f) {
     document.getElementById(`${f.key}-error`).classList.add("hidden");
 }
 
+/* Add whole years to a YYYY-MM-DD string (clamps 29 Feb to 28 Feb on non-leap years) */
+function addYears(dateStr, years) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const targetYear = y + years;
+    const lastDay = new Date(targetYear, m, 0).getDate();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${targetYear}-${p(m)}-${p(Math.min(d, lastDay))}`;
+}
+
+/* Latest allowed expiry = start + N years - 1 day
+   e.g. 26/10/2026 + 1 year -> 25/10/2027 */
+function maxExpiryDate(startStr, years) {
+    const [y, m, d] = addYears(startStr, years).split("-").map(Number);
+    const dt = new Date(y, m - 1, d - 1);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+
+/* YYYY-MM-DD -> DD/MM/YYYY for messages */
+const formatDisplayDate = (s) => s.split("-").reverse().join("/");
+
 function validateForm() {
     let firstInvalid = null;
 
@@ -186,11 +213,34 @@ function validateForm() {
         }
     });
 
-    const start = getValue(fieldByKey("license_start_date"));
-    const expiry = getValue(fieldByKey("license_expiry_date"));
-    if (start && expiry && expiry <= start) {
-        setError(fieldByKey("license_expiry_date"), "Expiry date must be after the start date.");
-        if (!firstInvalid) firstInvalid = fieldByKey("license_expiry_date");
+    const start    = getValue(fieldByKey("license_start_date"));
+    const expiry   = getValue(fieldByKey("license_expiry_date"));
+    const duration = getValue(fieldByKey("license_duration"));
+    const expiryField = fieldByKey("license_expiry_date");
+
+    if (expiry) {   // empty case is already handled by the required check
+        const today = toInputDate(new Date());
+        let message = null;
+
+        if (expiry <= today) {
+            message = "Expiry date must be a future date.";
+        } else if (start && expiry <= start) {
+            message = "Expiry date must be after the start date.";
+        } else if (start && duration) {
+            const years = parseInt(duration, 10);   // "3 Years" -> 3
+            if (years) {
+                // The expiry must be exactly start + duration - 1 day
+                const requiredExpiry = maxExpiryDate(start, years);
+                if (expiry !== requiredExpiry) {
+                    message = `Expiry date does not match the ${duration.toLowerCase()} license duration. The allowed date is ${formatDisplayDate(requiredExpiry)}.`;
+                }
+            }
+        }
+
+        if (message) {
+            setError(expiryField, message);
+            if (!firstInvalid) firstInvalid = expiryField;
+        }
     }
 
     if (firstInvalid) {
@@ -260,6 +310,12 @@ function showToast(message, type = "success", duration = 4000, onClose = null) {
    Zoho init
 --------------------------------------------------------------- */
 renderForm();
+
+// Clear a stale expiry error when Start Date or Duration changes
+["license_start_date", "license_duration"].forEach(key => {
+    const evt = key === "license_duration" ? "change" : "input";
+    document.getElementById(key).addEventListener(evt, () => clearError(fieldByKey("license_expiry_date")));
+});
 
 ZOHO.embeddedApp.on("PageLoad", async function (e) {
     await initializeWidget(e);
